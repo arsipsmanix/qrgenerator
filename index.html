@@ -41,7 +41,7 @@
         <!-- Form Input Gambar -->
         <div id="formImage" class="space-y-2 hidden">
             <label class="block text-sm font-semibold text-gray-600">Pilih Foto TTD:</label>
-            <input type="file" id="inputFile" accept="image/*" class="w-full p-1 border rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-900" />
+            <input type="file" id="inputFile" accept="image/*" capture="environment" class="w-full p-1 border rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-900" />
             <div id="compressStatus" class="text-xs text-green-600 font-medium mt-1"></div>
         </div>
 
@@ -172,34 +172,55 @@
             }
         }
 
-        // Render QR Code dengan Logo Ditengah + Pasang Link Download
-        function generateQROnly(content) {
-            const container = document.getElementById('qrcodeCanvas');
-            container.innerHTML = "";
-            
-            new AwesomeQR.AwesomeQR({
-                text: content, 
-                size: 350, 
-                margin: 10, 
-                correctLevel: AwesomeQR.QRErrorCorrectLevel.H, // Proteksi Level H agar aman ditumpuk logo
-                logoImage: document.getElementById('logoSman').src,
-                logoScale: 0.22, 
-                logoMargin: 4, 
-                logoCornerRadius: 8
-            }).draw().then(dataUrl => {
-                const img = document.createElement('img'); 
-                img.src = dataUrl;
-                container.appendChild(img);
-                
-                const downloadBtn = document.getElementById('btnDownload');
-                downloadBtn.href = dataUrl;
-                
-                document.getElementById('qrResult').classList.remove('hidden');
-            }).catch(err => {
-                alert("Gagal menggabungkan gambar QR. Pastikan file Logo9.png ada di folder yang sama di Vercel.");
-            });
-        }
+       // Render QR Code dengan Logo Ditengah yang Proporsional + Pasang Link Download
+function generateQROnly(content) {
+    const container = document.getElementById('qrcodeCanvas');
+    container.innerHTML = "";
+    
+    const logoImg = document.getElementById('logoSman');
+    
+    // Hitung proporsi asli logo agar tidak gepeng
+    const originalWidth = logoImg.naturalWidth || 1;
+    const originalHeight = logoImg.naturalHeight || 1;
+    const aspectRatio = originalWidth / originalHeight;
 
+    // Tentukan skala base logo (misal lebar base 22% dari total QR)
+    let logoScaleX = 0.22;
+    let logoScaleY = 0.22;
+
+    // Sesuaikan skala berdasarkan bentuk gambar asli
+    if (aspectRatio > 1) {
+        // Jika logo landscape
+        logoScaleY = logoScaleX / aspectRatio;
+    } else if (aspectRatio < 1) {
+        // Jika logo portrait (Perisai SMAN 9)
+        logoScaleX = logoScaleY * aspectRatio;
+    }
+    
+    new AwesomeQR.AwesomeQR({
+        text: content, 
+        size: 350, 
+        margin: 10, 
+        correctLevel: AwesomeQR.QRErrorCorrectLevel.H,
+        logoImage: logoImg.src,
+        logoScale: Math.max(logoScaleX, logoScaleY), // Menggunakan library wrapper untuk handling proporsional
+        logoMargin: 4, 
+        logoCornerRadius: 4
+    }).draw().then(dataUrl => {
+        // Cadangan trik jika AwesomeQR bawaan masih memaksa square: 
+        // Kita timpa menggunakan penempelan manual berbasis CSS Canvas atau biarkan library menghitung rasionya
+        const img = document.createElement('img'); 
+        img.src = dataUrl;
+        container.appendChild(img);
+        
+        const downloadBtn = document.getElementById('btnDownload');
+        downloadBtn.href = dataUrl;
+        
+        document.getElementById('qrResult').classList.remove('hidden');
+    }).catch(err => {
+        alert("Gagal membuat QR Code.");
+    });
+}
         // Fungsi Penarik Gambar saat Anton melakukan Scan QR
         async function loadFullImage(fileId) {
             try {

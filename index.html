@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SMAN 9 QR Generator & Viewer</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Library Awesome QR -->
+    <script src="https://cdn.jsdelivr.net/npm/awesome-qr@2.1.5-rc.0/dist/awesome-qr.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <!-- SCREEN 1: VIEWER UNTUK TAMU (ANTON) -->
+    <div id="viewerScreen" class="hidden w-full max-w-md bg-white p-6 rounded-2xl shadow-xl text-center">
+        <h2 class="text-2xl font-bold text-blue-950 mb-1">Verifikasi Dokumen</h2>
+        <p class="text-gray-600 text-sm mb-5">Resmi SMAN 9</p>
+        
+        <div id="loadingText" class="text-gray-500 p-6 animate-pulse">Memuat data...</div>
+        <img id="fullImage" class="hidden w-full h-auto rounded-lg border shadow-lg" alt="Tanda Tangan" />
+        
+        <div class="mt-6 text-xs text-gray-400">Sistem Validasi Digital SMAN 9</div>
+    </div>
+
+    <!-- SCREEN 2: GENERATOR UTAMA (UNTUK KAMU) -->
+    <div id="generatorScreen" class="w-full max-w-md bg-white p-6 rounded-2xl shadow-xl">
+        <h1 class="text-2xl font-bold text-center text-blue-900 mb-6">Generator QR SMAN 9</h1>
+        
+        <!-- Tab Mode -->
+        <div class="flex gap-2 mb-4">
+            <button id="btnLinkMode" onclick="switchMode('link')" class="flex-1 py-2 bg-blue-900 text-white rounded-lg font-medium transition">Input Link</button>
+            <button id="btnImageMode" onclick="switchMode('image')" class="flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium transition">Input Foto TTD</button>
+        </div>
+
+        <!-- Form Input Link -->
+        <div id="formLink" class="space-y-2">
+            <label class="block text-sm font-semibold text-gray-600">Masukkan Link/URL:</label>
+            <input type="url" id="inputUrl" placeholder="https://sman9.sch.id" class="w-full p-2 border rounded-lg focus:outline-blue-900" />
+        </div>
+
+        <!-- Form Input Gambar -->
+        <div id="formImage" class="space-y-2 hidden">
+            <label class="block text-sm font-semibold text-gray-600">Pilih Foto TTD:</label>
+            <input type="file" id="inputFile" accept="image/*" class="w-full p-1 border rounded-lg file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-900" />
+            <div id="compressStatus" class="text-xs text-green-600 font-medium mt-1"></div>
+        </div>
+
+        <!-- Tombol Aksi -->
+        <button id="btnGenerate" onclick="processGenerate()" class="w-full mt-6 bg-blue-950 text-white p-3 rounded-lg font-bold hover:bg-blue-900 transition disabled:bg-gray-400">
+            Generate QR Code
+        </button>
+
+        <!-- Tempat Tampil QR Code & Download -->
+        <div id="qrResult" class="mt-6 flex flex-col items-center justify-center hidden">
+            <div id="qrcodeCanvas" class="bg-white p-2 border rounded-lg"></div>
+            <p class="text-xs text-gray-500 mt-2 text-center font-medium">QR Code Berhasil Dibuat!</p>
+            <a id="btnDownload" download="qr-sman9.png" class="mt-3 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700 transition cursor-pointer text-center block w-full max-w-[200px]">
+                Download QR Code
+            </a>
+        </div>
+    </div>
+
+    <!-- PANGGIL LOGO LOKAL PROJEK VERCEL -->
+    <img id="logoSman" src="Logo9.png" class="hidden" alt="Logo SMAN 9" />
+
+    <script>
+        // PENTING: Ganti dengan URL Web App Apps Script kamu yang sudah di-deploy ('Anyone')
+        const GAS_URL = "https://script.google.com/macros/s/AKfycbxirDU-m-F..."; 
+        const VERCEL_BASE_URL = window.location.origin + window.location.pathname;
+
+        let currentMode = 'link';
+        let compressedFileBase64 = null;
+        let fileType = "";
+        let fileName = "";
+
+        // Otomatis Deteksi Mode (Generate vs View) saat halaman dibuka
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const fileId = urlParams.get('id');
+
+            if (fileId) {
+                // Jika discan Anton (mengandung ?id=...), tampilkan Screen 1
+                document.getElementById('generatorScreen').classList.add('hidden');
+                document.getElementById('viewerScreen').classList.remove('hidden');
+                loadFullImage(fileId);
+            } else {
+                // Jika dibuka normal, tampilkan Screen 2
+                document.getElementById('generatorScreen').classList.remove('hidden');
+            }
+        }
+
+        function switchMode(mode) {
+            currentMode = mode;
+            document.getElementById('qrResult').classList.add('hidden');
+            if(mode === 'link') {
+                document.getElementById('formLink').classList.remove('hidden');
+                document.getElementById('formImage').classList.add('hidden');
+                document.getElementById('btnLinkMode').className = "flex-1 py-2 bg-blue-900 text-white rounded-lg font-medium transition";
+                document.getElementById('btnImageMode').className = "flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium transition";
+            } else {
+                document.getElementById('formLink').classList.add('hidden');
+                document.getElementById('formImage').classList.remove('hidden');
+                document.getElementById('btnLinkMode').className = "flex-1 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium transition";
+                document.getElementById('btnImageMode').className = "flex-1 py-2 bg-blue-900 text-white rounded-lg font-medium transition";
+            }
+        }
+
+        // Kompresi Gambar Otomatis di Sisi Klien agar muat di Google Drive
+        document.getElementById('inputFile').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            fileType = file.type;
+            fileName = file.name;
+            document.getElementById('compressStatus').innerText = "Memproses dan mengompresi gambar...";
+
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = function(event) {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_W = 1200; // Resolusi aman biar tetap tajam saat discan
+                    let w = img.width; let h = img.height;
+                    if (w > MAX_W) { h = h * (MAX_W / w); w = MAX_W; }
+                    canvas.width = w; canvas.height = h;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                    compressedFileBase64 = dataUrl.split(',')[1];
+                    document.getElementById('compressStatus').innerText = "Gambar siap di-generate!";
+                }
+            }
+        });
+
+        async function processGenerate() {
+            const btn = document.getElementById('btnGenerate');
+            btn.disabled = true; btn.innerText = "Memproses...";
+            
+            if(currentMode === 'link') {
+                const urlContent = document.getElementById('inputUrl').value;
+                if(!urlContent) { alert("Masukkan link tujuan!"); btn.disabled = false; btn.innerText = "Generate QR Code"; return; }
+                generateQROnly(urlContent);
+                btn.disabled = false; btn.innerText = "Generate QR Code";
+            } else {
+                if(!compressedFileBase64) { alert("Pilih gambar tanda tangan terlebih dahulu!"); btn.disabled = false; btn.innerText = "Generate QR Code"; return; }
+                
+                // Kirim Gambar ke Server Google Drive via GAS
+                try {
+                    const response = await fetch(GAS_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: "uploadImage",
+                            base64Data: compressedFileBase64,
+                            mimeType: fileType,
+                            fileName: fileName
+                        })
+                    });
+                    const result = await response.json();
+                    if(result.status === "success") {
+                        // QR Code berisi Link Vercel dengan parameter ID Gambar di Google Drive
+                        const viewLink = `${VERCEL_BASE_URL}?id=${result.fileId}`;
+                        generateQROnly(viewLink);
+                    } else {
+                        alert("Gagal upload ke cloud: " + result.message);
+                    }
+                } catch (err) { 
+                    alert("Gagal terhubung ke server backend: " + err.toString()); 
+                }
+                btn.disabled = false; btn.innerText = "Generate QR Code";
+            }
+        }
+
+        // Render QR Code dengan Logo Ditengah + Pasang Link Download
+        function generateQROnly(content) {
+            const container = document.getElementById('qrcodeCanvas');
+            container.innerHTML = "";
+            
+            new AwesomeQR.AwesomeQR({
+                text: content, 
+                size: 350, 
+                margin: 10, 
+                correctLevel: AwesomeQR.QRErrorCorrectLevel.H, // Proteksi Level H agar aman ditumpuk logo
+                logoImage: document.getElementById('logoSman').src,
+                logoScale: 0.22, 
+                logoMargin: 4, 
+                logoCornerRadius: 8
+            }).draw().then(dataUrl => {
+                const img = document.createElement('img'); 
+                img.src = dataUrl;
+                container.appendChild(img);
+                
+                const downloadBtn = document.getElementById('btnDownload');
+                downloadBtn.href = dataUrl;
+                
+                document.getElementById('qrResult').classList.remove('hidden');
+            }).catch(err => {
+                alert("Gagal menggabungkan gambar QR. Pastikan file Logo9.png ada di folder yang sama di Vercel.");
+            });
+        }
+
+        // Fungsi Penarik Gambar saat Anton melakukan Scan QR
+        async function loadFullImage(fileId) {
+            try {
+                const response = await fetch(GAS_URL, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: "getImageData",
+                        fileId: fileId
+                    })
+                });
+                const result = await response.json();
+                if(result.status === "success") {
+                    document.getElementById('loadingText').classList.add('hidden');
+                    const img = document.getElementById('fullImage');
+                    img.src = `data:${result.mimeType};base64,${result.base64Data}`;
+                    img.classList.remove('hidden');
+                } else {
+                    document.getElementById('loadingText').innerText = "Gambar tidak ditemukan di Drive.";
+                }
+            } catch (err) {
+                document.getElementById('loadingText').innerText = "Gagal memverifikasi dokumen digital.";
+            }
+        }
+    </script>
+</body>
+</html>
